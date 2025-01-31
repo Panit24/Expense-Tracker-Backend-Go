@@ -12,6 +12,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"github.com/joho/godotenv"
+	"github.com/rs/cors"
 )
 
 var db *gorm.DB
@@ -56,6 +57,20 @@ func main() {
 	initDB()
 	r := gin.Default()
 
+	// Configure CORS
+	corsMiddleware := cors.New(cors.Options{
+		AllowedOrigins:   []string{"*"}, // Allow all origins (change this for security)
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE"},
+		AllowedHeaders:   []string{"Content-Type", "Authorization"},
+		AllowCredentials: true,
+	})
+
+	// Apply middleware
+	r.Use(func(c *gin.Context) {
+		corsMiddleware.HandlerFunc(c.Writer, c.Request)
+		c.Next()
+	})
+
 	// API routes
 	r.POST("/expenses", createExpense)
 	r.GET("/expenses", getExpenses)
@@ -75,8 +90,30 @@ func createExpense(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	expense.Date = time.Now()
-	db.Create(&expense)
+
+	// If the date is provided and is in the incomplete format (YYYY-MM-DDTHH:MM),
+	// add seconds and a timezone offset to complete the date
+	if expense.Date.IsZero() && expense.Date.String() != "" {
+		// Assuming the date is in the format "2025-01-17T23:51"
+		// Add missing seconds and timezone offset (UTC)
+		parsedDate, err := time.Parse("2006-01-02T15:04", expense.Date.String())
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date format"})
+			return
+		}
+		// Add seconds (00) and assume UTC timezone
+		expense.Date = parsedDate.UTC().Add(time.Second * 0)
+	}
+
+	// Store expense in the database (assuming db is a valid database connection)
+	if err := db.Create(&expense).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create expense"})
+		return
+	}
+  //---
+	// expense.Date = time.Now()
+	// db.Create(&expense)
+	//---
 	c.JSON(http.StatusCreated, expense)
 }
 
